@@ -1,0 +1,25 @@
+[package]
+name = "bot2bot"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT"
+description = "An encrypted, mutually authenticated, real-time channel for one bot to talk to another"
+repository = "https://github.com/daefery/bot2bot"
+publish = false
+
+[dependencies]
+anyhow = "1"
+base64 = "0.22"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+snow = "0.10"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-std", "io-util", "time", "sync", "fs", "signal"] }
+tokio-tungstenite = { version = "0.30", features = ["connect", "rustls-tls-webpki-roots"] }
+ureq = { version = "3", features = ["json"] }
+
+[profile.release]
+strip = true
+lto = "thin"
