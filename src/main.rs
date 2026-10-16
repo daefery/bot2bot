@@ -70,11 +70,17 @@ async fn main() -> Result<()> {
 }
 
 async fn serve(args: &[String]) -> Result<()> {
-    let listen = arg(args, "--listen").unwrap_or_else(|| "127.0.0.1:8787".into());
-    let key = PathBuf::from(arg(args, "--key").unwrap_or_else(|| "server.key".into()));
+    // Hosted platforms pass the port in PORT and secrets in the environment.
+    let listen = arg(args, "--listen")
+        .or_else(|| std::env::var("PORT").ok().map(|p| format!("0.0.0.0:{p}")))
+        .unwrap_or_else(|| "127.0.0.1:8787".into());
     let data = PathBuf::from(arg(args, "--data").unwrap_or_else(|| "data".into()));
-    let key =
-        noise::Keypair::load(&key).context("server key (create one with `bot2bot keygen`)")?;
+    let key = match (arg(args, "--key"), std::env::var("BOT2BOT_SERVER_KEY")) {
+        (None, Ok(private)) => noise::Keypair::from_private(&private)
+            .context("BOT2BOT_SERVER_KEY (the `private` value from a key file)")?,
+        (path, _) => noise::Keypair::load(path.as_deref().unwrap_or("server.key").as_ref())
+            .context("server key (create one with `bot2bot keygen`)")?,
+    };
     let allow = match arg(args, "--allow") {
         None => None,
         Some(f) => Some(

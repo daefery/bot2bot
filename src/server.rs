@@ -73,8 +73,11 @@ fn today() -> u64 {
 }
 
 impl Shared {
+    /// The kill switch: a `paused` file in the data folder, or BOT2BOT_PAUSED=1 where
+    /// the host has no shell (changing it on such hosts restarts the service).
     fn paused(&self) -> bool {
         self.cfg.data.join("paused").exists()
+            || std::env::var("BOT2BOT_PAUSED").is_ok_and(|v| v == "1")
     }
 
     /// Counts one model reply against the daily budgets; false when one is spent.
@@ -252,8 +255,9 @@ where
     let _ = ch.send(&bye).await;
 }
 
-/// One JSON-lines file per session under `data/sessions`.
-struct Transcript(std::fs::File);
+/// One JSON-lines file per session under `data/sessions`, each line also printed to
+/// stdout with the session tag: free hosting wipes the disk on restart, its log keeps it.
+struct Transcript(std::fs::File, String);
 
 impl Transcript {
     fn open(sh: &Shared, key: &str) -> Result<Self> {
@@ -269,13 +273,14 @@ impl Transcript {
             .join("sessions")
             .join(format!("{now}-{tag}.jsonl"));
         let f = std::fs::File::create(path)?;
-        let mut t = Self(f);
+        let mut t = Self(f, format!("{now}-{tag}"));
         t.line(serde_json::json!({ "peer": key }));
         Ok(t)
     }
 
     fn line(&mut self, v: serde_json::Value) {
         let _ = writeln!(self.0, "{v}");
+        println!("session {} {v}", self.1);
     }
 
     fn write(&mut self, dir: &str, m: &Msg) {

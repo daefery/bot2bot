@@ -69,6 +69,13 @@ impl Keypair {
         })
     }
 
+    /// From a private key alone (base64); the public half is derived from it.
+    pub fn from_private(b64: &str) -> Result<Self> {
+        let private = decode_key(b64)?;
+        let public = x25519_public(&private)?;
+        Ok(Self { private, public })
+    }
+
     /// Key file format: `private <base64>` and `public <base64>`, one per line.
     pub fn load(path: &Path) -> Result<Self> {
         let text = std::fs::read_to_string(path)
@@ -113,6 +120,26 @@ impl Keypair {
         k.save_new(path)?;
         Ok(k)
     }
+}
+
+/// The public key for an X25519 private key, found by completing a handshake with
+/// it: snow does not expose the scalar multiplication directly.
+fn x25519_public(private: &[u8]) -> Result<Vec<u8>> {
+    let server = Builder::new(params()).generate_keypair()?;
+    let mut init = Builder::new(params())
+        .local_private_key(private)?
+        .remote_public_key(&server.public)?
+        .build_initiator()?;
+    let mut resp = Builder::new(params())
+        .local_private_key(&server.private)?
+        .build_responder()?;
+    let mut buf = [0u8; 256];
+    let mut out = [0u8; 256];
+    let n = init.write_message(&[], &mut buf)?;
+    resp.read_message(&buf[..n], &mut out)?;
+    resp.get_remote_static()
+        .map(<[u8]>::to_vec)
+        .context("could not derive the public key")
 }
 
 pub fn encode_key(k: &[u8]) -> String {
