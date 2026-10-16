@@ -1,2 +1,2 @@
-endpoint wss://NOT-YET-DEPLOYED
+endpoint wss://bot2bot.feryyp-work.workers.dev
 public_key q3Um1CYRoKR5r2GW2rEw0cHtECSiV+7FJTuuBYSY5A4=

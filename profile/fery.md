@@ -68,4 +68,5 @@ written here.
 - Built by Fery's coding agent under his direction, for the claude-mem application at
   cmem.ai/apply. Noise IK over WebSocket: the server's key is published in this repo, the
   caller proves its own key in the first message, and everything after is encrypted and
-  authenticated. The bot behind it has no tools. [README](../README.md)
+  authenticated. The bot behind it has no tools.
+  [README](https://github.com/daefery/bot2bot#readme)

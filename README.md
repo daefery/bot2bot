@@ -23,10 +23,14 @@ stdout, so another program can drive it. `/bye` ends the session.
 
 | | |
 |---|---|
-| Endpoint | in [`server.txt`](server.txt) (`wss://`, TLS) |
+| Endpoint | `wss://bot2bot.feryyp-work.workers.dev` (also in [`server.txt`](server.txt)) |
 | Server public key | in [`server.txt`](server.txt) (X25519, base64) |
 | Your identity | an X25519 key pair you generate; no account or token to request |
 | Limits | 4,000 characters a message, 40 replies a session, 10 minutes idle, 100 replies a day per key |
+
+Replies take a few seconds: the model behind the bot runs on a free tier, and when it is
+busy the bot waits and retries before answering. If a session ends with "the model is
+unavailable", try again a minute later.
 
 ## How authentication and encryption work
 
@@ -59,8 +63,8 @@ The protocol is small: each frame is one Noise message holding one JSON object.
 
 ## What is on the other end
 
-A chat model behind an OpenAI-compatible endpoint, given [`profile/fery.md`](profile/fery.md)
-and the rules in [`src/brain.rs`](src/brain.rs). Everything in the profile is public and
+A chat model (Gemini, through its OpenAI-compatible endpoint) given
+[`profile/fery.md`](profile/fery.md) and the rules in [`worker/src/brain.ts`](worker/src/brain.ts). Everything in the profile is public and
 names its source; the bot says it doesn't know rather than guess, makes no commitments for
 Fery, and treats every incoming message as data, not instructions.
 
@@ -76,33 +80,53 @@ worst a hostile message can do is steer the words of one reply.
 | Replay or reordering | Noise nonces: a message out of order fails to decrypt and ends the session |
 | Prompt injection | No tools; a fixed rule set; the bot's whole knowledge is one public file |
 | Running up the owner's model bill | Per-session, per-key and daily reply caps; message size and rate limits |
-| Abuse at any time | A kill switch: creating `data/paused` refuses new sessions and ends open ones at their next message |
-| Keys leaking | Private keys are created mode 0600 and ignored by git; no credential is in this repository |
+| Abuse at any time | A kill switch: `BOT2BOT_PAUSED=1` refuses new sessions and ends open ones at their next message |
+| Keys leaking | Private keys are created mode 0600 and ignored by git; on the server they are Cloudflare secrets; no credential is in this repository |
 
-Every session is logged as JSON lines under `data/sessions/` on the server, so Fery can read
-what was said.
+Every message in and out is logged, so Fery can read what was said.
+
+## Where it runs
+
+The live endpoint is a [Cloudflare Worker](https://developers.cloudflare.com/workers/)
+([`worker/`](worker)). The responder side of Noise IK is written again in TypeScript
+([`worker/src/noise.ts`](worker/src/noise.ts), from the
+[Noise specification](https://noiseprotocol.org/noise.html), revision 34, with the
+[noble](https://paulmillr.com/noble/) libraries for X25519, ChaCha20-Poly1305 and BLAKE2s).
+Each connection gets its own Durable Object; a second one keeps the daily reply budget.
+
+Two implementations of one protocol could drift apart, so CI runs the Rust client against
+the TypeScript server on every push:
+
+```sh
+cd worker && npm ci
+node --experimental-strip-types test/server.mjs 18900 <server-private-key> &
+../target/release/bot2bot selftest --url ws://127.0.0.1:18900 --server-key <server-public-key>
+```
+
+The Rust server (`bot2bot serve`) is the same protocol and limits for running anywhere else.
 
 ## Code
 
-About 900 lines of Rust, self-test included:
-
 | File | What it does |
 |---|---|
-| [`src/noise.rs`](src/noise.rs) | The handshake, keys, message types and encrypted channel |
+| [`src/noise.rs`](src/noise.rs) | The handshake, keys, message types and encrypted channel (Rust, [snow](https://crates.io/crates/snow)) |
 | [`src/client.rs`](src/client.rs) | The connecting side (`chat`) |
-| [`src/server.rs`](src/server.rs) | Admission, limits, kill switch, transcripts |
-| [`src/brain.rs`](src/brain.rs) | The model call and its rules |
-| [`src/main.rs`](src/main.rs) | Commands and the self-test |
+| [`src/main.rs`](src/main.rs) | Commands and both self-tests |
+| [`worker/src/noise.ts`](worker/src/noise.ts) | The responder side of Noise IK in TypeScript |
+| [`worker/src/session.ts`](worker/src/session.ts) | One session: handshake, decryption, message rules |
+| [`worker/src/index.ts`](worker/src/index.ts) | The Worker: routing, limits, kill switch, budgets |
+| [`worker/src/brain.ts`](worker/src/brain.ts) | The model call, its rules and model fallback |
+| [`src/server.rs`](src/server.rs), [`src/brain.rs`](src/brain.rs) | The same server in Rust, for self-hosting |
 
-## Running the server
+## Running your own
 
 ```sh
-cargo run --release -- keygen ~/.config/bot2bot/server.key   # prints the public key for server.txt
-export BOT2BOT_MODEL_URL=https://.../v1 BOT2BOT_MODEL_KEY=... BOT2BOT_MODEL=...
-cargo run --release -- serve --listen 127.0.0.1:8787 --key ~/.config/bot2bot/server.key
+cargo run --release -- keygen server.key          # prints the public key for server.txt
+cd worker && npm ci
+npx wrangler secret put BOT2BOT_SERVER_KEY        # the `private` value from server.key
+npx wrangler secret put BOT2BOT_MODEL_KEY         # a Gemini API key
+npx wrangler deploy
 ```
-
-Put a TLS-terminating reverse proxy (for example Caddy) in front for `wss://`.
 
 ## License
 

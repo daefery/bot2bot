@@ -33,8 +33,11 @@ export default {
       );
     }
     // One Durable Object per connection; another (Budget) keeps the daily counters.
+    // A Durable Object is created near its first caller, and the Gemini API refuses some
+    // locations ("User location is not supported"), so sessions are placed in the US.
+    console.log(JSON.stringify({ note: "connect", colo: (req.cf as { colo?: string })?.colo }));
     const id = env.SESSIONS.newUniqueId();
-    return env.SESSIONS.get(id).fetch(req);
+    return env.SESSIONS.get(id, { locationHint: "wnam" }).fetch(req);
   },
 };
 
@@ -109,7 +112,7 @@ export class Session extends DurableObject<Env> {
 
 /** Daily reply budgets, counted in one Durable Object so every session shares them. */
 async function spend(env: Env, peer: string): Promise<boolean> {
-  const budget = env.BUDGET.get(env.BUDGET.idFromName("daily"));
+  const budget = env.BUDGET.get(env.BUDGET.idFromName("daily"), { locationHint: "wnam" });
   return budget.spend(peer, LIMITS.daily, LIMITS.dailyPerKey);
 }
 
