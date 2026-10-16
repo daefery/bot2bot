@@ -1,0 +1,19 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "bot2bot",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "rules": [{ "type": "Text", "globs": ["**/*.md"], "fallthrough": true }],
+  "durable_objects": {
+    "bindings": [
+      { "name": "SESSIONS", "class_name": "Session" },
+      { "name": "BUDGET", "class_name": "Budget" }
+    ]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Session", "Budget"] }],
+  "vars": {
+    "BOT2BOT_MODEL_URL": "https://generativelanguage.googleapis.com/v1beta/openai",
+    "BOT2BOT_MODEL": "gemini-3.6-flash,gemini-3.5-flash-lite"
+  },
+  "observability": { "enabled": true }
+}

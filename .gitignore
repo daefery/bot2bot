@@ -2,3 +2,6 @@
 *.key
 /data
 .env
+/worker/node_modules
+/worker/.dev.vars
+/worker/.wrangler

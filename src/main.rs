@@ -15,7 +15,9 @@ bot2bot: an encrypted, mutually authenticated, real-time channel between two bot
                                           talk to Fery's bot: one line in, one line out
   bot2bot serve [--listen ADDR] [--key FILE] [--data DIR] [--echo] [--allow FILE]
                                           run Fery's side (see README: Running the server)
-  bot2bot selftest                        run both sides locally and check the channel
+  bot2bot selftest [--url U --server-key K]
+                                          run both sides locally and check the channel, or
+                                          check another server (an echo build) against this client
 
 Defaults: --url and --server-key come from server.txt in this repository,
 --key is ./client.key (created on first use), --name is \"claude-mem bot\".";
@@ -61,7 +63,10 @@ async fn main() -> Result<()> {
             client::chat(ch).await?;
         }
         Some("serve") => serve(&args).await?,
-        Some("selftest") => selftest().await?,
+        Some("selftest") => match (arg(&args, "--url"), arg(&args, "--server-key")) {
+            (Some(url), Some(k)) => interop(&url, &noise::decode_key(&k)?).await?,
+            _ => selftest().await?,
+        },
         _ => {
             println!("{USAGE}");
         }
@@ -117,6 +122,32 @@ async fn serve(args: &[String]) -> Result<()> {
         data,
     };
     server::serve(listener, cfg, brain).await
+}
+
+/// The Rust client against another server (the TypeScript Worker under test): an
+/// echo round trip proves both implementations agree on every byte of the protocol.
+async fn interop(url: &str, server_public: &[u8]) -> Result<()> {
+    let me = noise::Keypair::generate()?;
+    let mut ch = client::connect(url, &me, server_public, "interop").await?;
+    for text in ["first", "second"] {
+        ch.send(&noise::Msg::Text { text: text.into() }).await?;
+        match ch.recv().await? {
+            Some(noise::Msg::Text { text: got }) if got == format!("echo: {text}") => {}
+            other => bail!("round trip: {other:?}"),
+        }
+    }
+    ch.send(&noise::Msg::Ping).await?;
+    if ch.recv().await? != Some(noise::Msg::Pong) {
+        bail!("ping");
+    }
+    ch.close().await;
+    println!("ok   Rust client and {url}: handshake, two encrypted round trips, ping");
+    let wrong = noise::Keypair::generate()?.public;
+    if client::connect(url, &me, &wrong, "interop").await.is_ok() {
+        bail!("connected with the wrong server key");
+    }
+    println!("ok   wrong server key refused");
+    Ok(())
 }
 
 /// Both sides in one process over a real socket: the happy path and every refusal a

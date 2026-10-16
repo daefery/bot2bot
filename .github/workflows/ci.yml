@@ -8,6 +8,21 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo run --release -- selftest
+      - run: cargo build --release
+      - name: Rust client against the Rust server
+        run: ./target/release/bot2bot selftest
+      - name: Rust client against the TypeScript (Worker) server
+        working-directory: worker
+        run: |
+          npm ci
+          npx tsc --noEmit
+          ../target/release/bot2bot keygen /tmp/s.key > /tmp/pub
+          node --experimental-strip-types --no-warnings test/server.mjs 18900 \
+            "$(grep '^private' /tmp/s.key | cut -d' ' -f2)" &
+          sleep 2
+          ../target/release/bot2bot selftest --url ws://127.0.0.1:18900 --server-key "$(cat /tmp/pub)"
