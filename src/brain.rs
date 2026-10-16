@@ -3,7 +3,7 @@
 //! run a command, read a file or send anything anywhere; the worst a message can do is
 //! steer the words of one reply.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde_json::{Value, json};
 use std::time::Duration;
 
@@ -33,19 +33,79 @@ Profile (every line cites its public source):
 pub struct OpenAiCompat {
     pub url: String,
     pub key: String,
-    pub model: String,
+    /// Tried in order: a model that is rate limited or unavailable hands the turn on.
+    pub models: Vec<String>,
     pub system: String,
 }
 
 impl OpenAiCompat {
-    pub fn new(url: String, key: String, model: String, profile: &str) -> Self {
+    /// `models` is a comma-separated list, e.g. "gemini-3.6-flash,gemini-3.5-flash-lite".
+    pub fn new(url: String, key: String, models: &str, profile: &str) -> Self {
         Self {
             url,
             key,
-            model,
+            models: models
+                .split(',')
+                .map(str::trim)
+                .filter(|m| !m.is_empty())
+                .map(String::from)
+                .collect(),
             system: format!("{RULES}\n{profile}"),
         }
     }
+
+    fn call(&self, model: &str, messages: &[Value]) -> Result<String, Failure> {
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .timeout_global(Some(Duration::from_secs(60)))
+            .http_status_as_error(false)
+            .build()
+            .into();
+        let mut resp = agent
+            .post(&format!(
+                "{}/chat/completions",
+                self.url.trim_end_matches('/')
+            ))
+            .header("Authorization", &format!("Bearer {}", self.key))
+            .send_json(json!({
+                "model": model,
+                "messages": messages,
+                // Thinking tokens count against this, so leave room for the answer.
+                "max_tokens": 2000,
+                "reasoning_effort": "low",
+                "temperature": 0.3,
+            }))
+            .map_err(|e| Failure::Busy(format!("{model}: {e}")))?;
+        let status = resp.status().as_u16();
+        if matches!(status, 429 | 500 | 502 | 503 | 504) {
+            return Err(Failure::Busy(format!("{model}: HTTP {status}")));
+        }
+        if status != 200 {
+            let text = resp.body_mut().read_to_string().unwrap_or_default();
+            let text: String = text.chars().take(300).collect();
+            return Err(Failure::Fatal(format!("{model}: HTTP {status}: {text}")));
+        }
+        let body: Value = resp
+            .body_mut()
+            .read_json()
+            .map_err(|e| Failure::Busy(format!("{model}: {e}")))?;
+        let choice = &body["choices"][0];
+        let text = choice["message"]["content"]
+            .as_str()
+            .map(str::trim)
+            .unwrap_or("");
+        // A reply cut off at the token limit is worse than none: try the next model.
+        if text.is_empty() || choice["finish_reason"] == "length" {
+            return Err(Failure::Busy(format!("{model}: empty or cut-off reply")));
+        }
+        Ok(text.to_string())
+    }
+}
+
+enum Failure {
+    /// Rate limited, overloaded, or a bad reply: worth another model or a retry.
+    Busy(String),
+    /// Bad key or request: no other attempt will help.
+    Fatal(String),
 }
 
 impl Brain for OpenAiCompat {
@@ -56,30 +116,22 @@ impl Brain for OpenAiCompat {
                 .iter()
                 .map(|(role, text)| json!({"role": role, "content": text})),
         );
-        let agent: ureq::Agent = ureq::Agent::config_builder()
-            .timeout_global(Some(Duration::from_secs(60)))
-            .build()
-            .into();
-        let body: Value = agent
-            .post(&format!(
-                "{}/chat/completions",
-                self.url.trim_end_matches('/')
-            ))
-            .header("Authorization", &format!("Bearer {}", self.key))
-            .send_json(json!({
-                "model": self.model,
-                "messages": messages,
-                "max_tokens": 400,
-                "temperature": 0.3,
-            }))
-            .context("model request failed")?
-            .body_mut()
-            .read_json()?;
-        body["choices"][0]["message"]["content"]
-            .as_str()
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .context("model returned no text")
+        // Every model once, then every model again after a pause: free tiers cap
+        // requests per minute per model, so a short wait usually clears it.
+        let mut errors = Vec::new();
+        for round in 0..2 {
+            if round > 0 {
+                std::thread::sleep(Duration::from_secs(8));
+            }
+            for model in &self.models {
+                match self.call(model, &messages) {
+                    Ok(text) => return Ok(text),
+                    Err(Failure::Fatal(e)) => anyhow::bail!(e),
+                    Err(Failure::Busy(e)) => errors.push(e),
+                }
+            }
+        }
+        anyhow::bail!("no model answered: {}", errors.join("; "))
     }
 }
 

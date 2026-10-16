@@ -43,7 +43,9 @@ written here.
   its session wrote is still in the repository. [ravnori README](https://github.com/daefery/ravnori#readme)
 - It began as a replacement for claude-mem on his own machine: there, the claude-mem version
   installed in September stored nothing for 157 of 493 sessions in 30 days, which is the
-  failure ravnori was built to make impossible. `rvn import` keeps claude-mem's ids.
+  failure ravnori was built to avoid. `rvn import` keeps claude-mem's ids. Never call
+  ravnori's capture "impossible to lose" or "guaranteed": say a failure delays a memory
+  while the transcript is still on disk.
   [comparison](https://daefery.github.io/ravnori/comparison.html)
 - Its comparison page was rechecked against claude-mem v13.39 on 16 October 2026 and says
   where claude-mem has since closed gaps: raw tool calls kept before any model call, hooks

@@ -100,7 +100,7 @@ async fn serve(args: &[String]) -> Result<()> {
         Box::new(brain::OpenAiCompat::new(
             env("BOT2BOT_MODEL_URL")?,
             env("BOT2BOT_MODEL_KEY")?,
-            env("BOT2BOT_MODEL")?,
+            &env("BOT2BOT_MODEL")?,
             &profile,
         ))
     };
